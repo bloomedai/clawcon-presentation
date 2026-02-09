@@ -199,8 +199,8 @@
     </div>
     
     <div class="controls">
-      <button onclick="playSlide(0)" id="introBtn">▶ Slide 1</button>
-      <button onclick="playSlide(1)" id="slide2Btn">▶ Slide 2</button>
+      <button onclick="playOrPause()" id="playBtn">▶ Play</button>
+      <button onclick="nextSlide()" id="nextBtn">⏭ Next</button>
       <button onclick="toggleLive()" id="liveBtn">📡 Live Mode</button>
       <button onclick="clear()" id="clearBtn">✕ Clear</button>
     </div>
@@ -233,7 +233,23 @@
     // WebSocket connection
     function connect() {
       const wsUrl = `ws://${location.host}/ws`;
-      ws = new WebSocket(wsUrl);
+      
+    // Auto-advance to next slide when audio ends
+    audio.addEventListener('ended', () => {
+      status.textContent = 'Connected';
+      status.className = 'status connected';
+      document.getElementById('playBtn').textContent = '▶ Play';
+      
+      if (autoAdvance && !isLive) {
+        setTimeout(() => {
+          if (currentSlide + 1 < slides.length) {
+            nextSlide();
+          }
+        }, 500); // Small pause between slides
+      }
+    });
+
+    ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
         console.log('[WS] Connected');
@@ -308,6 +324,8 @@
       audio.play();
       
       status.textContent = 'Speaking...';
+        document.getElementById('playBtn').textContent = '⏸ Pause';
+        isPlaying = true;
       status.className = 'status speaking';
     }
     
@@ -373,6 +391,43 @@
       { audio: 'slide2.mp3', alignment: 'slide2-alignment.json' }
     ];
     let currentSlide = 0;
+
+    // Presentation state
+    let isPlaying = false;
+    let autoAdvance = true;
+    
+    // Play or pause current slide
+    function playOrPause() {
+      if (audio.paused) {
+        if (!audio.src || audio.ended) {
+          playSlide(currentSlide);
+        } else {
+          audio.play();
+        }
+        isPlaying = true;
+        document.getElementById('playBtn').textContent = '⏸ Pause';
+      } else {
+        audio.pause();
+        isPlaying = false;
+        document.getElementById('playBtn').textContent = '▶ Play';
+      }
+    }
+    
+    // Advance to next slide
+    function nextSlide() {
+      const next = currentSlide + 1;
+      if (next < slides.length) {
+        playSlide(next);
+      } else {
+        // Loop back or stop
+        currentSlide = 0;
+        transcript.innerHTML = '<span class="waiting">End of presentation</span>';
+        status.textContent = 'Connected';
+        status.className = 'status connected';
+        document.getElementById('playBtn').textContent = '▶ Replay';
+      }
+    }
+
 
     // Play pre-rendered slide
     async function playSlide(index = 0) {
