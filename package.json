@@ -1,0 +1,25 @@
+{
+  "name": "clawcon-presentation",
+  "version": "1.0.0",
+  "description": "Alfred's self-presenting slides for ClawCon Vienna 2026",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "openclaw",
+    "tts",
+    "presentation",
+    "elevenlabs"
+  ],
+  "author": "Jeronim Stürenberg & Alfred",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bloomedai/clawcon-presentation"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}
