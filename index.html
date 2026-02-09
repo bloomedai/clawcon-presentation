@@ -195,7 +195,8 @@
     let currentWords = [];
     let audioQueue = [];
     let isPlaying = false;
-    
+    let expectedDuration = 0;
+
     const audio = document.getElementById('audio');
     const transcript = document.getElementById('transcript');
     const progress = document.getElementById('progress');
@@ -260,7 +261,8 @@
     // Play speech with karaoke sync
     function playSpeech(data) {
       currentWords = data.words;
-      
+      expectedDuration = currentWords.length > 0 ? currentWords[currentWords.length - 1].end : 0;
+
       // Reset progress bar
       progress.style.width = '0%';
       
@@ -294,10 +296,10 @@
     // Audio time update - sync words
     audio.addEventListener('timeupdate', () => {
       const currentTime = audio.currentTime;
-      const duration = audio.duration;
-      
+      const duration = isFinite(audio.duration) ? audio.duration : expectedDuration;
+
       // Update progress bar (only if duration is valid)
-      if (duration && !isNaN(duration) && duration > 0) {
+      if (duration > 0) {
         const pct = Math.min((currentTime / duration) * 100, 100);
         progress.style.width = pct + '%';
       }
@@ -363,7 +365,8 @@
         }
         
         currentWords = words;
-        
+        expectedDuration = words.length > 0 ? words[words.length - 1].end : 0;
+
         // Render words
         transcript.innerHTML = '';
         words.forEach((w, i) => {
