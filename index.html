@@ -221,6 +221,7 @@
     let currentWords = [];
     let audioQueue = [];
     let isPlaying = false;
+    let autoAdvance = true;
     let expectedDuration = 0;
     let rafId = null;
 
@@ -392,10 +393,6 @@
     ];
     let currentSlide = 0;
 
-    // Presentation state
-    let isPlaying = false;
-    let autoAdvance = true;
-    
     // Play or pause current slide
     function playOrPause() {
       if (audio.paused) {
