@@ -199,7 +199,8 @@
     </div>
     
     <div class="controls">
-      <button onclick="playIntro()" id="introBtn">▶ Play Intro</button>
+      <button onclick="playSlide(0)" id="introBtn">▶ Slide 1</button>
+      <button onclick="playSlide(1)" id="slide2Btn">▶ Slide 2</button>
       <button onclick="toggleLive()" id="liveBtn">📡 Live Mode</button>
       <button onclick="clear()" id="clearBtn">✕ Clear</button>
     </div>
@@ -365,13 +366,25 @@
       setTimeout(playNext, 500);
     });
     
-    // Play pre-rendered intro
-    async function playIntro() {
+    
+    // Slide definitions
+    const slides = [
+      { audio: 'intro.mp3', alignment: 'intro-alignment.json' },
+      { audio: 'slide2.mp3', alignment: 'slide2-alignment.json' }
+    ];
+    let currentSlide = 0;
+
+    // Play pre-rendered slide
+    async function playSlide(index = 0) {
+      currentSlide = index;
+      const slide = slides[index];
+      if (!slide) return;
+      
       // Reset progress bar
       progress.style.width = '0%';
       
       try {
-        const alignRes = await fetch('intro-alignment.json');
+        const alignRes = await fetch(slide.alignment);
         const alignment = await alignRes.json();
         
         // Convert to word timings
@@ -412,18 +425,21 @@
           transcript.appendChild(span);
         });
         
-        audio.src = 'intro.mp3';
+        audio.src = slide.audio;
         audio.play();
         
         status.textContent = 'Speaking...';
         status.className = 'status speaking';
         
       } catch (err) {
-        console.error('Failed to load intro:', err);
-        transcript.innerHTML = '<span class="waiting">Failed to load intro</span>';
+        console.error('Failed to load slide:', err);
+        transcript.innerHTML = '<span class="waiting">Failed to load slide</span>';
       }
     }
     
+    // Legacy alias
+    function playIntro() { playSlide(0); }
+
     // Toggle live mode indicator
     function toggleLive() {
       isLive = !isLive;
