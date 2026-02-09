@@ -109,7 +109,6 @@
       height: 100%;
       background: linear-gradient(90deg, #e74c3c, #f39c12);
       width: 0%;
-      transition: width 0.1s linear;
     }
     
     .progress-bar.animated {
@@ -145,6 +144,29 @@
     body.fullscreen .mode-indicator { opacity: 0; }
     body.fullscreen .status { opacity: 0.3; }
     
+    /* Footer brand watermark */
+    .footer-brand {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .footer-logo {
+      font-size: 20vw;
+      font-weight: bold;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      color: rgba(255, 255, 255, 0.04);
+      margin-bottom: -0.35em;
+      white-space: nowrap;
+    }
+
     /* Waiting animation */
     @keyframes pulse {
       0%, 100% { opacity: 0.3; }
@@ -185,6 +207,10 @@
   </div>
   
   <div class="queue-indicator" id="queue"></div>
+
+  <footer class="footer-brand" aria-hidden="true">
+    <span class="footer-logo">Alfred</span>
+  </footer>
   
   <audio id="audio"></audio>
   
@@ -196,6 +222,7 @@
     let audioQueue = [];
     let isPlaying = false;
     let expectedDuration = 0;
+    let rafId = null;
 
     const audio = document.getElementById('audio');
     const transcript = document.getElementById('transcript');
@@ -284,32 +311,40 @@
       status.className = 'status speaking';
     }
     
-    // Reset progress on play start
-    audio.addEventListener('play', () => {
+    // Smooth progress bar via requestAnimationFrame
+    function updateProgress() {
+      const duration = isFinite(audio.duration) ? audio.duration : expectedDuration;
+      if (duration > 0) {
+        const pct = Math.min((audio.currentTime / duration) * 100, 100);
+        progress.style.width = pct + '%';
+      }
+      rafId = requestAnimationFrame(updateProgress);
+    }
+
+    function startProgressLoop() {
+      if (rafId) cancelAnimationFrame(rafId);
       progress.classList.add('animated');
-    });
-    
-    audio.addEventListener('pause', () => {
+      rafId = requestAnimationFrame(updateProgress);
+    }
+
+    function stopProgressLoop() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       progress.classList.remove('animated');
-    });
-    
+    }
+
+    audio.addEventListener('play', startProgressLoop);
+    audio.addEventListener('pause', stopProgressLoop);
+
     // Audio time update - sync words
     audio.addEventListener('timeupdate', () => {
       const currentTime = audio.currentTime;
-      const duration = isFinite(audio.duration) ? audio.duration : expectedDuration;
 
-      // Update progress bar (only if duration is valid)
-      if (duration > 0) {
-        const pct = Math.min((currentTime / duration) * 100, 100);
-        progress.style.width = pct + '%';
-      }
-      
       document.querySelectorAll('.word').forEach((el, i) => {
         const timing = currentWords[i];
         if (!timing) return;
-        
+
         el.classList.remove('active', 'spoken');
-        
+
         if (currentTime >= timing.start && currentTime < timing.end + 0.15) {
           el.classList.add('active');
         } else if (currentTime >= timing.end) {
@@ -319,13 +354,14 @@
     });
     
     audio.addEventListener('ended', () => {
+      stopProgressLoop();
       // Mark all words as spoken
       document.querySelectorAll('.word').forEach(el => {
         el.classList.remove('active');
         el.classList.add('spoken');
       });
       progress.style.width = '100%';
-      
+
       // Play next in queue
       setTimeout(playNext, 500);
     });
@@ -402,6 +438,7 @@
     
     // Clear display
     function clear() {
+      stopProgressLoop();
       transcript.innerHTML = '<span class="waiting">Waiting for Alfred...</span>';
       progress.style.width = '0%';
       audio.pause();
@@ -423,7 +460,11 @@
         }
       }
       if (e.code === 'KeyF') {
-        document.body.classList.toggle('fullscreen');
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else {
+          document.exitFullscreen();
+        }
       }
       if (e.code === 'KeyL') {
         toggleLive();
@@ -436,6 +477,11 @@
       }
     });
     
+    // Sync fullscreen CSS class with browser state
+    document.addEventListener('fullscreenchange', () => {
+      document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
+    });
+
     // Start
     connect();
   </script>
