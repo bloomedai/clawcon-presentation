@@ -6,15 +6,6 @@
 - Use 0-ver in all projects: https://0ver.org/
 - Always use gh cli with github urls
 
-## Alfred (remote server)
-
-- SSH alias: `alfred` (just `ssh alfred`)
-- macOS machine at `/Users/alfred/`, default shell: fish (`/usr/local/bin/fish`)
-- **SSH gotcha**: `ssh alfred "command"` uses non-interactive non-login shell — minimal PATH. Use `/usr/local/bin/fish -l -c 'command'` for full PATH.
-- Homebrew: `/usr/local/bin/brew`, Pixi: `~/.pixi/bin/pixi`
-- Dotfiles synced via rsync (no GitHub SSH key on alfred): fish config, ghostty config, update-all scripts
-- Nightly cron at 3:00 AM: `update-all --quiet` (logs in `~/.local/state/`)
-
 ## Working Process (TDD)
 
 1. **No implementation without acceptance criteria.** Before writing any code, ask the user to define the expected end state and how to verify it (test cases, assertions, CLI output, etc.).
