@@ -109,7 +109,16 @@
       height: 100%;
       background: linear-gradient(90deg, #e74c3c, #f39c12);
       width: 0%;
-      transition: width 0.05s linear;
+      transition: width 0.1s linear;
+    }
+    
+    .progress-bar.animated {
+      animation: progress-glow 2s ease-in-out infinite;
+    }
+    
+    @keyframes progress-glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
     }
     
     .mode-indicator {
@@ -252,6 +261,9 @@
     function playSpeech(data) {
       currentWords = data.words;
       
+      // Reset progress bar
+      progress.style.width = '0%';
+      
       // Render words
       transcript.innerHTML = '';
       currentWords.forEach((w, i) => {
@@ -270,12 +282,25 @@
       status.className = 'status speaking';
     }
     
+    // Reset progress on play start
+    audio.addEventListener('play', () => {
+      progress.classList.add('animated');
+    });
+    
+    audio.addEventListener('pause', () => {
+      progress.classList.remove('animated');
+    });
+    
     // Audio time update - sync words
     audio.addEventListener('timeupdate', () => {
       const currentTime = audio.currentTime;
-      const duration = audio.duration || 1;
+      const duration = audio.duration;
       
-      progress.style.width = (currentTime / duration * 100) + '%';
+      // Update progress bar (only if duration is valid)
+      if (duration && !isNaN(duration) && duration > 0) {
+        const pct = Math.min((currentTime / duration) * 100, 100);
+        progress.style.width = pct + '%';
+      }
       
       document.querySelectorAll('.word').forEach((el, i) => {
         const timing = currentWords[i];
@@ -305,6 +330,9 @@
     
     // Play pre-rendered intro
     async function playIntro() {
+      // Reset progress bar
+      progress.style.width = '0%';
+      
       try {
         const alignRes = await fetch('intro-alignment.json');
         const alignment = await alignRes.json();
