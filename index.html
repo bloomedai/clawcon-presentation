@@ -282,16 +282,16 @@
             case 'playSlide':
               playSlide(data.index || 0);
               break;
+            case 'showSlide':
+              showSlide(data.index || 0);
+              break;
             case 'toggleLive':
               toggleLive();
               break;
             case 'navigate':
-              // Open URL in new tab or iframe
-              if (data.url.startsWith('http://localhost:8080')) {
-                location.reload();
-              } else {
-                window.open(data.url, '_blank');
-              }
+              // Store current URL before navigating
+              sessionStorage.setItem('returnUrl', location.href);
+              location.href = data.url;
               break;
             case 'clear':
               clear();
@@ -523,6 +523,59 @@
     }
     
     // Legacy alias
+    
+    // Show slide in finished state (no audio)
+    async function showSlide(index = 0) {
+      currentSlide = index;
+      const slide = slides[index];
+      if (!slide) return;
+      
+      progress.style.width = '100%';
+      
+      try {
+        const alignRes = await fetch(slide.alignment);
+        const alignment = await alignRes.json();
+        
+        // Convert to words
+        const words = [];
+        const { characters, character_start_times_seconds, character_end_times_seconds } = alignment;
+        let wordStart = 0;
+        let currentWord = '';
+        
+        for (let i = 0; i < characters.length; i++) {
+          if (characters[i] === ' ' || i === characters.length - 1) {
+            if (i === characters.length - 1 && characters[i] !== ' ') {
+              currentWord += characters[i];
+            }
+            if (currentWord.trim()) {
+              words.push({ word: currentWord });
+            }
+            currentWord = '';
+            wordStart = i + 1;
+          } else {
+            currentWord += characters[i];
+          }
+        }
+        
+        // Render all words as spoken (finished state)
+        transcript.innerHTML = '';
+        words.forEach((w, i) => {
+          const span = document.createElement('span');
+          span.className = 'word spoken';  // All words visible
+          span.textContent = w.word + ' ';
+          span.dataset.index = i;
+          transcript.appendChild(span);
+        });
+        
+        status.textContent = 'Connected';
+        status.className = 'status connected';
+        document.getElementById('playBtn').textContent = '▶ Play';
+        
+      } catch (err) {
+        console.error('Failed to load slide:', err);
+      }
+    }
+
     function playIntro() { playSlide(0); }
 
     // Toggle live mode indicator

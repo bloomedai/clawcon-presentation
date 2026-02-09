@@ -157,6 +157,11 @@ const server = http.createServer(async (req, res) => {
         let result = { ok: true, action };
         
         switch (action) {
+          case 'showSlide':
+            broadcast({ type: 'control', action: 'showSlide', index: index || 0 });
+            result.slide = index;
+            result.mode = 'static';
+            break;
           case 'playSlide':
             broadcast({ type: 'control', action: 'playSlide', index: index || 0 });
             result.slide = index;
