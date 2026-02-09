@@ -146,6 +146,46 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
+
+  // API endpoint for presentation control (used by Lobster pipeline)
+  if (req.method === 'POST' && req.url === '/api/control') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { action, index, url } = JSON.parse(body);
+        let result = { ok: true, action };
+        
+        switch (action) {
+          case 'playSlide':
+            broadcast({ type: 'control', action: 'playSlide', index: index || 0 });
+            result.slide = index;
+            break;
+          case 'toggleLive':
+            broadcast({ type: 'control', action: 'toggleLive' });
+            break;
+          case 'navigate':
+            broadcast({ type: 'control', action: 'navigate', url });
+            result.url = url;
+            break;
+          case 'clear':
+            broadcast({ type: 'control', action: 'clear' });
+            break;
+          default:
+            throw new Error('Unknown action: ' + action);
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        console.error('[Control API] Error:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   
   // Static file serving
   let filePath = req.url === '/' ? '/index.html' : req.url;

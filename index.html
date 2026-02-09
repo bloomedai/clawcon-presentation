@@ -275,6 +275,31 @@
       
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
+
+        // Handle control messages from Lobster pipeline
+        if (data.type === 'control') {
+          switch (data.action) {
+            case 'playSlide':
+              playSlide(data.index || 0);
+              break;
+            case 'toggleLive':
+              toggleLive();
+              break;
+            case 'navigate':
+              // Open URL in new tab or iframe
+              if (data.url.startsWith('http://localhost:8080')) {
+                location.reload();
+              } else {
+                window.open(data.url, '_blank');
+              }
+              break;
+            case 'clear':
+              clear();
+              break;
+          }
+          return;
+        }
+
         console.log('[WS] Message:', data.type);
         
         if (data.type === 'speak') {
