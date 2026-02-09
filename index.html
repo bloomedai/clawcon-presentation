@@ -245,6 +245,14 @@
         setTimeout(() => {
           if (currentSlide + 1 < slides.length) {
             nextSlide();
+          } else {
+            // Enter live mode after last slide
+            setTimeout(() => {
+              if (!isLive) {
+                toggleLive();
+                transcript.innerHTML = '<span class="waiting">Alfred is now live...</span>';
+              }
+            }, 1000);
           }
         }, 500); // Small pause between slides
       }
