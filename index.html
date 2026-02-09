@@ -139,7 +139,6 @@
     }
     
     /* Fullscreen mode */
-    body.fullscreen .controls,
     body.fullscreen .mode-indicator { opacity: 0; }
     body.fullscreen .status { opacity: 0.3; }
     
@@ -606,11 +605,7 @@
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
         e.preventDefault();
-        if (audio.paused) {
-          audio.play();
-        } else {
-          audio.pause();
-        }
+        playOrPause();
       }
       if (e.code === 'KeyF') {
         if (!document.fullscreenElement) {
