@@ -153,7 +153,7 @@ const server = http.createServer(async (req, res) => {
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
       try {
-        const { action, index, url } = JSON.parse(body);
+        const { action, index, url, enabled } = JSON.parse(body);
         let result = { ok: true, action };
         
         switch (action) {
@@ -175,6 +175,9 @@ const server = http.createServer(async (req, res) => {
             break;
           case 'clear':
             broadcast({ type: 'control', action: 'clear' });
+            break;
+          case 'fullscreen':
+            broadcast({ type: 'control', action: 'fullscreen', enabled: !!enabled });
             break;
           default:
             throw new Error('Unknown action: ' + action);

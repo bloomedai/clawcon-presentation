@@ -139,6 +139,7 @@
     }
     
     /* Fullscreen mode */
+    body.fullscreen .controls { opacity: 0; }
     body.fullscreen .mode-indicator { opacity: 0; }
     body.fullscreen .status { opacity: 0.3; }
     
@@ -244,14 +245,6 @@
         setTimeout(() => {
           if (currentSlide + 1 < slides.length) {
             nextSlide();
-          } else {
-            // Enter live mode after last slide
-            setTimeout(() => {
-              if (!isLive) {
-                toggleLive();
-                transcript.innerHTML = '<span class="waiting">Alfred is now live...</span>';
-              }
-            }, 1000);
           }
         }, 500); // Small pause between slides
       }
@@ -294,6 +287,13 @@
               break;
             case 'clear':
               clear();
+              break;
+            case 'fullscreen':
+              if (data.enabled) {
+                document.documentElement.requestFullscreen().catch(() => {});
+              } else {
+                if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+              }
               break;
           }
           return;
