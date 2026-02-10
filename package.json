@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "print": "node print-server.js"
   },
   "keywords": [
     "openclaw",
@@ -20,6 +21,7 @@
     "url": "https://github.com/bloomedai/clawcon-presentation"
   },
   "dependencies": {
+    "serialport": "^13.0.0",
     "ws": "^8.19.0"
   }
 }
