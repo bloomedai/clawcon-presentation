@@ -10,32 +10,65 @@
 const http = require('http');
 const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 const PORT = process.env.PORT || 3420;
 const DEVICE = '/dev/cu.PT-280';
 const BT_ADDRESS = '86-67-7a-6b-fb-e7';
 const BT_PIN = '0000';
-const PYTHON = '/tmp/printer_venv/bin/python3';
+const VENV_DIR = path.join(__dirname, '.venv');
+const PYTHON = path.join(VENV_DIR, 'bin', 'python3');
 
 function deviceExists() {
   return fs.existsSync(DEVICE);
 }
 
+function ensureVenv() {
+  if (fs.existsSync(PYTHON)) {
+    console.log('[VENV] Python venv OK');
+    return;
+  }
+  console.log('[VENV] Creating venv and installing pyserial...');
+  execSync(`uv venv "${VENV_DIR}" && uv pip install --python "${PYTHON}" pyserial`, {
+    stdio: 'inherit',
+    timeout: 60000,
+  });
+  console.log('[VENV] Ready');
+}
+
+function sleep(ms) {
+  execSync(`sleep ${ms / 1000}`);
+}
+
+function isBluetoothConnected() {
+  try {
+    return execSync(`blueutil --is-connected ${BT_ADDRESS}`, { timeout: 3000 }).toString().trim() === '1';
+  } catch {
+    return false;
+  }
+}
+
+function softConnect() {
+  console.log('[BT] Soft connect attempt...');
+  execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
+  sleep(3000);
+}
+
 function reconnectBluetooth() {
-  console.log('[BT] Reconnecting printer...');
+  console.log('[BT] Full reconnect (unpair/re-pair)...');
   try { execSync(`blueutil --disconnect ${BT_ADDRESS}`, { timeout: 5000 }); } catch {}
   try { execSync(`blueutil --unpair ${BT_ADDRESS}`, { timeout: 5000 }); } catch {}
 
-  execSync(`sleep 2`);
+  sleep(2000);
   console.log('[BT] Scanning...');
   try { execSync(`blueutil --inquiry 5`, { timeout: 15000 }); } catch {}
 
   console.log('[BT] Pairing...');
   execSync(`echo "${BT_PIN}" | blueutil --pair ${BT_ADDRESS}`, { timeout: 15000 });
-  execSync(`sleep 2`);
+  sleep(2000);
   console.log('[BT] Connecting...');
   execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
-  execSync(`sleep 3`);
+  sleep(3000);
 
   if (!deviceExists()) {
     throw new Error('Serial device did not appear after re-pair');
@@ -44,13 +77,27 @@ function reconnectBluetooth() {
 }
 
 function ensureConnected() {
-  if (deviceExists()) {
+  if (deviceExists() && isBluetoothConnected()) return;
+
+  // Try soft connect first (handles common "drifted" disconnects)
+  for (let i = 0; i < 3; i++) {
     try {
-      const connected = execSync(`blueutil --is-connected ${BT_ADDRESS}`, { timeout: 3000 }).toString().trim();
-      if (connected === '1') return;
+      softConnect();
+      if (deviceExists() && isBluetoothConnected()) return;
     } catch {}
+    if (i < 2) sleep(2000);
   }
-  reconnectBluetooth();
+
+  // Nuclear option: full unpair/re-pair
+  for (let i = 0; i < 2; i++) {
+    try {
+      reconnectBluetooth();
+      if (deviceExists() && isBluetoothConnected()) return;
+    } catch {}
+    if (i < 1) sleep(2000);
+  }
+
+  throw new Error('Could not reconnect to printer after all retries');
 }
 
 // Print via Python subprocess — isolates serial port crashes from the server
@@ -202,6 +249,8 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
+ensureVenv();
+
 server.listen(PORT, () => {
   console.log(`
 🖨️  ClawCon Print Server (PT-280)
@@ -215,4 +264,17 @@ server.listen(PORT, () => {
      -H "Content-Type: application/json" \\
      -d '{"template":"clawcon-certificate","text":"Network with people!"}'
   `);
+
+  // Keepalive: check BT connection every 30s, soft-reconnect if dropped
+  setInterval(() => {
+    if (!isBluetoothConnected()) {
+      console.log('[BT] Keepalive: connection lost, attempting soft reconnect...');
+      try {
+        softConnect();
+        console.log('[BT] Keepalive: reconnected');
+      } catch (err) {
+        console.log(`[BT] Keepalive: reconnect failed (${err.message}), will retry next cycle`);
+      }
+    }
+  }, 30000);
 });
