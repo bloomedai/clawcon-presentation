@@ -2,15 +2,25 @@
 /**
  * ClawCon Print Server — PT-280 Thermal Printer (58mm, ESC/POS)
  *
+ * The PT-280 over macOS Bluetooth has a quirk: closing the serial port kills
+ * the RFCOMM data channel. To work around this, we keep a persistent Python
+ * worker process with the serial port open and feed it print data via stdin.
+ *
  * Endpoints:
  *   POST /api/print   - Print a receipt  { "template": "clawcon-certificate", "text": "..." }
+ *   POST /api/reset   - Full BT power cycle + re-pair + restart worker
  *   GET  /api/status   - Printer connectivity check
  */
 
 const http = require('http');
-const { execSync, execFileSync } = require('child_process');
+const { execSync } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+
+function log(tag, msg) {
+  console.log(`${new Date().toISOString()} [${tag}] ${msg}`);
+}
 
 const PORT = process.env.PORT || 3420;
 const DEVICE = '/dev/cu.PT-280';
@@ -19,21 +29,10 @@ const BT_PIN = '0000';
 const VENV_DIR = path.join(__dirname, '.venv');
 const PYTHON = path.join(VENV_DIR, 'bin', 'python3');
 
+// --- Setup ---
+
 function deviceExists() {
   return fs.existsSync(DEVICE);
-}
-
-function ensureVenv() {
-  if (fs.existsSync(PYTHON)) {
-    console.log('[VENV] Python venv OK');
-    return;
-  }
-  console.log('[VENV] Creating venv and installing pyserial...');
-  execSync(`uv venv "${VENV_DIR}" && uv pip install --python "${PYTHON}" pyserial`, {
-    stdio: 'inherit',
-    timeout: 60000,
-  });
-  console.log('[VENV] Ready');
 }
 
 function sleep(ms) {
@@ -48,74 +47,160 @@ function isBluetoothConnected() {
   }
 }
 
-function softConnect() {
-  console.log('[BT] Soft connect attempt...');
-  execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
-  sleep(3000);
+function ensureVenv() {
+  if (fs.existsSync(PYTHON)) return;
+  log('VENV', 'Creating venv and installing pyserial...');
+  execSync(`uv venv "${VENV_DIR}" && uv pip install --python "${PYTHON}" pyserial`, {
+    stdio: 'inherit',
+    timeout: 60000,
+  });
 }
 
-function reconnectBluetooth() {
-  console.log('[BT] Full reconnect (unpair/re-pair)...');
-  try { execSync(`blueutil --disconnect ${BT_ADDRESS}`, { timeout: 5000 }); } catch {}
-  try { execSync(`blueutil --unpair ${BT_ADDRESS}`, { timeout: 5000 }); } catch {}
+// --- Bluetooth connection management ---
 
+function btConnect() {
+  execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 5000 });
+  sleep(1000);
+}
+
+function btReset() {
+  log('BT', 'Full reset: power cycle + re-pair...');
+
+  try { execSync(`blueutil --disconnect ${BT_ADDRESS}`, { timeout: 3000 }); } catch {}
+  try { execSync(`blueutil --unpair ${BT_ADDRESS}`, { timeout: 3000 }); } catch {}
+  sleep(1000);
+
+  execSync('blueutil --power 0', { timeout: 5000 });
   sleep(2000);
-  console.log('[BT] Scanning...');
-  try { execSync(`blueutil --inquiry 5`, { timeout: 15000 }); } catch {}
+  execSync('blueutil --power 1', { timeout: 5000 });
+  sleep(3000);
 
-  console.log('[BT] Pairing...');
   execSync(`echo "${BT_PIN}" | blueutil --pair ${BT_ADDRESS}`, { timeout: 15000 });
-  sleep(2000);
-  console.log('[BT] Connecting...');
+  sleep(1000);
   execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
-  sleep(3000);
 
-  if (!deviceExists()) {
-    throw new Error('Serial device did not appear after re-pair');
+  // Wait for serial device (may need a disconnect+reconnect cycle)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (let i = 0; i < 5; i++) {
+      if (deviceExists()) {
+        log('BT', 'Reset complete, serial device ready');
+        return;
+      }
+      sleep(1000);
+    }
+    try { execSync(`blueutil --disconnect ${BT_ADDRESS}`, { timeout: 3000 }); } catch {}
+    sleep(1000);
+    execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
   }
-  console.log('[BT] Reconnected successfully');
+
+  if (!deviceExists()) throw new Error('Serial device did not appear after BT reset');
 }
 
-function ensureConnected() {
-  if (deviceExists() && isBluetoothConnected()) return;
+// --- Persistent print worker ---
+// Keeps /dev/cu.PT-280 open to preserve the RFCOMM channel.
+// Accepts hex-encoded ESC/POS data on stdin, one job per line.
 
-  // Try soft connect first (handles common "drifted" disconnects)
-  for (let i = 0; i < 3; i++) {
-    try {
-      softConnect();
-      if (deviceExists() && isBluetoothConnected()) return;
-    } catch {}
-    if (i < 2) sleep(2000);
+let printWorker = null;
+let printWorkerReady = false;
+
+function startWorker() {
+  if (printWorker && !printWorker.killed && printWorkerReady) {
+    return Promise.resolve();
   }
+  if (printWorker) { printWorker.kill(); printWorker = null; }
 
-  // Nuclear option: full unpair/re-pair
-  for (let i = 0; i < 2; i++) {
-    try {
-      reconnectBluetooth();
-      if (deviceExists() && isBluetoothConnected()) return;
-    } catch {}
-    if (i < 1) sleep(2000);
-  }
+  // Always do a full BT reset when starting the worker — a stale RFCOMM
+  // channel accepts writes silently but never delivers data to the printer.
+  btReset();
+  if (!deviceExists()) throw new Error('Serial device not available');
 
-  throw new Error('Could not reconnect to printer after all retries');
-}
+  return new Promise((resolve, reject) => {
+    log('WORKER', 'Starting...');
 
-// Print via Python subprocess — isolates serial port crashes from the server
-function printViaSubprocess(escposHex) {
-  const script = `
-import serial, time, sys
-data = bytes.fromhex(sys.argv[1])
-ser = serial.Serial('${DEVICE}', 9600, timeout=2)
-time.sleep(0.5)
-ser.write(data)
-ser.flush()
+    const script = `
+import serial, sys, time
+ser = serial.Serial()
+ser.port = '${DEVICE}'
+ser.baudrate = 9600
+ser.timeout = 2
+ser.hupcl = False
+ser.open()
+# Warmup: send ESC @ (init) to confirm the RFCOMM channel is truly live
 time.sleep(2)
-ser.close()
+ser.write(b'\\x1b@')
+ser.flush()
+time.sleep(1)
+print("READY", flush=True)
+for line in sys.stdin:
+    hex_data = line.strip()
+    if not hex_data:
+        continue
+    try:
+        data = bytes.fromhex(hex_data)
+        ser.write(data)
+        ser.flush()
+        time.sleep(1)
+        print(f"OK {len(data)}", flush=True)
+    except Exception as e:
+        print(f"ERR {e}", flush=True)
 `;
-  execFileSync(PYTHON, ['-c', script, escposHex], { timeout: 30000 });
+
+    printWorker = spawn(PYTHON, ['-u', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    printWorkerReady = false;
+
+    const timeout = setTimeout(() => {
+      if (!printWorkerReady) {
+        printWorker.kill();
+        printWorker = null;
+        reject(new Error('Print worker did not start'));
+      }
+    }, 20000);
+
+    printWorker.stdout.on('data', (data) => {
+      if (data.toString().trim() === 'READY' && !printWorkerReady) {
+        printWorkerReady = true;
+        clearTimeout(timeout);
+        log('WORKER', 'Ready');
+        resolve();
+      }
+    });
+
+    printWorker.stderr.on('data', (data) => {
+      log('WORKER', `stderr: ${data.toString().trim()}`);
+    });
+
+    printWorker.on('exit', (code) => {
+      log('WORKER', `Exited (code=${code})`);
+      printWorker = null;
+      printWorkerReady = false;
+    });
+  });
 }
 
-// --- ESC/POS builders (return hex strings) ---
+function sendToWorker(escposHex) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Print timeout')), 10000);
+
+    const onData = (data) => {
+      for (const line of data.toString().trim().split('\n')) {
+        if (line.startsWith('OK')) {
+          clearTimeout(timeout);
+          printWorker.stdout.removeListener('data', onData);
+          resolve();
+        } else if (line.startsWith('ERR')) {
+          clearTimeout(timeout);
+          printWorker.stdout.removeListener('data', onData);
+          reject(new Error(line));
+        }
+      }
+    };
+
+    printWorker.stdout.on('data', onData);
+    printWorker.stdin.write(escposHex + '\n');
+  });
+}
+
+// --- ESC/POS builders ---
 
 function hex(...buffers) {
   return Buffer.concat(buffers).toString('hex');
@@ -124,7 +209,6 @@ function hex(...buffers) {
 const ESC = Buffer.from([0x1b]);
 const GS = Buffer.from([0x1d]);
 const INIT = Buffer.concat([ESC, Buffer.from('@')]);
-const HEATING = Buffer.concat([ESC, Buffer.from([0x37, 0x0b, 0x50, 0x02])]);
 const CENTER = Buffer.concat([ESC, Buffer.from([0x61, 0x01])]);
 const LEFT = Buffer.concat([ESC, Buffer.from([0x61, 0x00])]);
 const BOLD_ON = Buffer.concat([ESC, Buffer.from([0x45, 0x01])]);
@@ -135,7 +219,7 @@ const LF = Buffer.from('\n');
 
 function buildCertificate(text) {
   return hex(
-    INIT, HEATING, CENTER,
+    INIT, CENTER,
     BOLD_ON, DOUBLE,
     Buffer.from('ClawCon 2026\n'),
     NORMAL, BOLD_OFF,
@@ -162,7 +246,7 @@ function buildCertificate(text) {
 function buildPlain(text) {
   const lines = text.match(/.{1,32}/g) || [text];
   return hex(
-    INIT, HEATING, LEFT,
+    INIT, LEFT,
     ...lines.map(l => Buffer.from(l + '\n')),
     LF, LF, LF, LF,
   );
@@ -173,19 +257,24 @@ const TEMPLATES = {
   'plain': buildPlain,
 };
 
-function printReceipt(template, text) {
+// --- Print orchestration ---
+
+async function printReceipt(template, text) {
   const builder = TEMPLATES[template];
   if (!builder) throw new Error(`Unknown template: ${template}`);
 
   const escposHex = builder(text);
 
   try {
-    ensureConnected();
-    printViaSubprocess(escposHex);
+    await startWorker();
+    await sendToWorker(escposHex);
   } catch (err) {
-    console.log(`[PRINT] Failed (${err.message}), forcing reconnect...`);
-    reconnectBluetooth();
-    printViaSubprocess(escposHex);
+    // Worker dead or BT dropped — full reset and retry
+    log('PRINT', `${err.message}, resetting...`);
+    if (printWorker) { printWorker.kill(); printWorker = null; }
+    btReset();
+    await startWorker();
+    await sendToWorker(escposHex);
   }
 }
 
@@ -204,8 +293,6 @@ function parseBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
-  console.log(`[HTTP] ${req.method} ${req.url}`);
-
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -215,16 +302,29 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  log('HTTP', `${req.method} ${req.url}`);
+
   if (req.method === 'GET' && req.url === '/api/status') {
+    const bt = isBluetoothConnected();
+    const device = deviceExists();
+    const worker = printWorkerReady;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ connected: bt, device, worker }));
+  }
+
+  if (req.method === 'POST' && req.url === '/api/reset') {
     try {
-      const connected = execSync(`blueutil --is-connected ${BT_ADDRESS}`, { timeout: 3000 }).toString().trim();
-      const device = deviceExists();
+      if (printWorker) { printWorker.kill(); printWorker = null; }
+      btReset();
+      await startWorker();
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ connected: connected === '1', device }));
-    } catch {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ connected: false, device: false }));
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      log('RESET', `Error: ${err.message}`);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
     }
+    return;
   }
 
   if (req.method === 'POST' && req.url === '/api/print') {
@@ -232,13 +332,14 @@ const server = http.createServer(async (req, res) => {
       const { template = 'plain', text } = await parseBody(req);
       if (!text) throw new Error('Missing text');
 
-      console.log(`[PRINT] template=${template} text="${text.substring(0, 40)}..."`);
-      printReceipt(template, text);
+      log('PRINT', `template=${template} text="${text.substring(0, 40)}..."`);
+      await printReceipt(template, text);
+      log('PRINT', 'OK');
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
-      console.error('[PRINT] Error:', err.message);
+      log('PRINT', `Error: ${err.message}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
@@ -258,23 +359,11 @@ server.listen(PORT, () => {
    http://localhost:${PORT}
 
    POST /api/print   { "template": "clawcon-certificate", "text": "..." }
+   POST /api/reset   Full BT power cycle + re-pair + restart worker
    GET  /api/status
 
    curl -X POST http://localhost:${PORT}/api/print \\
      -H "Content-Type: application/json" \\
      -d '{"template":"clawcon-certificate","text":"Network with people!"}'
   `);
-
-  // Keepalive: check BT connection every 30s, soft-reconnect if dropped
-  setInterval(() => {
-    if (!isBluetoothConnected()) {
-      console.log('[BT] Keepalive: connection lost, attempting soft reconnect...');
-      try {
-        softConnect();
-        console.log('[BT] Keepalive: reconnected');
-      } catch (err) {
-        console.log(`[BT] Keepalive: reconnect failed (${err.message}), will retry next cycle`);
-      }
-    }
-  }, 30000);
 });
