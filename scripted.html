@@ -6,7 +6,7 @@
   <title>Alfred Presents | ClawCon Vienna 2026</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    
+
     body {
       font-family: 'Georgia', serif;
       background: #0a0a0a;
@@ -18,17 +18,17 @@
       justify-content: center;
       padding: 2rem;
     }
-    
+
     .container {
       max-width: 1000px;
       width: 100%;
       text-align: center;
     }
-    
+
     header {
       margin-bottom: 3rem;
     }
-    
+
     h1 {
       font-size: 1.2rem;
       color: #666;
@@ -36,7 +36,7 @@
       letter-spacing: 0.3em;
       text-transform: uppercase;
     }
-    
+
     .status {
       display: inline-block;
       margin-top: 1rem;
@@ -45,33 +45,33 @@
       font-size: 0.8rem;
       font-family: monospace;
     }
-    
+
     .status.connected { background: #27ae60; color: white; }
     .status.disconnected { background: #e74c3c; color: white; }
     .status.speaking { background: #f39c12; color: white; }
-    
+
     .transcript {
       font-size: 2.8rem;
       line-height: 1.5;
       min-height: 250px;
       padding: 2rem;
     }
-    
+
     .word {
       display: inline;
       opacity: 0.15;
       transition: opacity 0.12s ease, transform 0.12s ease;
     }
-    
+
     .word.active {
       opacity: 1;
       color: #fff;
     }
-    
+
     .word.spoken {
       opacity: 0.6;
     }
-    
+
     .controls {
       margin-top: 3rem;
       display: flex;
@@ -79,7 +79,7 @@
       justify-content: center;
       flex-wrap: wrap;
     }
-    
+
     button {
       background: #333;
       color: white;
@@ -91,11 +91,11 @@
       font-family: inherit;
       transition: background 0.2s;
     }
-    
+
     button:hover { background: #444; }
     button.primary { background: #e74c3c; }
     button.primary:hover { background: #c0392b; }
-    
+
     .progress {
       width: 100%;
       height: 3px;
@@ -104,22 +104,22 @@
       border-radius: 2px;
       overflow: hidden;
     }
-    
+
     .progress-bar {
       height: 100%;
       background: linear-gradient(90deg, #e74c3c, #f39c12);
       width: 0%;
     }
-    
+
     .progress-bar.animated {
       animation: progress-glow 2s ease-in-out infinite;
     }
-    
+
     @keyframes progress-glow {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
     }
-    
+
     .mode-indicator {
       position: fixed;
       top: 1rem;
@@ -128,21 +128,12 @@
       color: #666;
       font-family: monospace;
     }
-    
-    .queue-indicator {
-      position: fixed;
-      bottom: 1rem;
-      right: 1rem;
-      font-size: 0.75rem;
-      color: #444;
-      font-family: monospace;
-    }
-    
+
     /* Fullscreen mode */
     body.fullscreen .controls { opacity: 0; }
     body.fullscreen .mode-indicator { opacity: 0; }
     body.fullscreen .status { opacity: 0.3; }
-    
+
     /* Footer brand watermark */
     .footer-brand {
       position: fixed;
@@ -171,7 +162,7 @@
       0%, 100% { opacity: 0.3; }
       50% { opacity: 0.6; }
     }
-    
+
     .waiting {
       animation: pulse 2s ease-in-out infinite;
       font-style: italic;
@@ -181,47 +172,42 @@
 </head>
 <body>
   <div class="mode-indicator">
-    Press F for fullscreen · Space to play · L for live mode
+    Press F for fullscreen · Space to play · I for intro · P to print
   </div>
-  
+
   <div class="container">
     <header>
       <h1>🎩 Alfred</h1>
       <div class="status disconnected" id="status">Connecting...</div>
     </header>
-    
+
     <div class="transcript" id="transcript">
       <span class="waiting">Waiting for Alfred...</span>
     </div>
-    
+
     <div class="progress">
       <div class="progress-bar" id="progress"></div>
     </div>
-    
+
     <div class="controls">
       <button onclick="playOrPause()" id="playBtn">▶ Play</button>
       <button onclick="nextSlide()" id="nextBtn">⏭ Next</button>
-      <button onclick="toggleLive()" id="liveBtn">📡 Live Mode</button>
       <button onclick="clear()" id="clearBtn">✕ Clear</button>
     </div>
   </div>
-  
-  <div class="queue-indicator" id="queue"></div>
 
   <footer class="footer-brand" aria-hidden="true">
     <span class="footer-logo">Alfred</span>
   </footer>
-  
+
   <audio id="audio"></audio>
-  
+
   <script>
     // State
     let ws = null;
-    let isLive = false;
     let currentWords = [];
-    let audioQueue = [];
     let isPlaying = false;
-    let autoAdvance = true;
+    let autoAdvance = false;
     let expectedDuration = 0;
     let rafId = null;
 
@@ -229,42 +215,41 @@
     const transcript = document.getElementById('transcript');
     const progress = document.getElementById('progress');
     const status = document.getElementById('status');
-    const queueEl = document.getElementById('queue');
-    
-    // WebSocket connection
+
+    // WebSocket connection (needed for Lobster pipeline control messages)
     function connect() {
       const wsUrl = `ws://${location.host}/ws`;
-      
-    // Auto-advance to next slide when audio ends
-    audio.addEventListener('ended', () => {
-      status.textContent = 'Connected';
-      status.className = 'status connected';
-      document.getElementById('playBtn').textContent = '▶ Play';
-      
-      if (autoAdvance && !isLive) {
-        setTimeout(() => {
-          if (currentSlide + 1 < slides.length) {
-            nextSlide();
-          }
-        }, 500); // Small pause between slides
-      }
-    });
 
-    ws = new WebSocket(wsUrl);
-      
+      // Auto-advance to next slide when audio ends
+      audio.addEventListener('ended', () => {
+        status.textContent = 'Connected';
+        status.className = 'status connected';
+        document.getElementById('playBtn').textContent = '▶ Play';
+
+        if (autoAdvance) {
+          setTimeout(() => {
+            if (currentSlide + 1 < slides.length) {
+              nextSlide();
+            }
+          }, 500);
+        }
+      });
+
+      ws = new WebSocket(wsUrl);
+
       ws.onopen = () => {
         console.log('[WS] Connected');
         status.textContent = 'Connected';
         status.className = 'status connected';
       };
-      
+
       ws.onclose = () => {
         console.log('[WS] Disconnected, reconnecting...');
         status.textContent = 'Disconnected';
         status.className = 'status disconnected';
         setTimeout(connect, 2000);
       };
-      
+
       ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
@@ -277,11 +262,7 @@
             case 'showSlide':
               showSlide(data.index || 0);
               break;
-            case 'toggleLive':
-              toggleLive();
-              break;
             case 'navigate':
-              // Store current URL before navigating
               sessionStorage.setItem('returnUrl', location.href);
               location.href = data.url;
               break;
@@ -298,70 +279,9 @@
           }
           return;
         }
-
-        console.log('[WS] Message:', data.type);
-        
-        if (data.type === 'speak') {
-          queueSpeech(data);
-        }
       };
     }
-    
-    // Queue management for multiple messages
-    function queueSpeech(data) {
-      audioQueue.push(data);
-      updateQueueIndicator();
-      if (!isPlaying) {
-        playNext();
-      }
-    }
-    
-    function updateQueueIndicator() {
-      queueEl.textContent = audioQueue.length > 0 ? `Queue: ${audioQueue.length}` : '';
-    }
-    
-    function playNext() {
-      if (audioQueue.length === 0) {
-        isPlaying = false;
-        status.textContent = 'Connected';
-        status.className = 'status connected';
-        return;
-      }
-      
-      isPlaying = true;
-      const data = audioQueue.shift();
-      updateQueueIndicator();
-      playSpeech(data);
-    }
-    
-    // Play speech with karaoke sync
-    function playSpeech(data) {
-      currentWords = data.words;
-      expectedDuration = currentWords.length > 0 ? currentWords[currentWords.length - 1].end : 0;
 
-      // Reset progress bar
-      progress.style.width = '0%';
-      
-      // Render words
-      transcript.innerHTML = '';
-      currentWords.forEach((w, i) => {
-        const span = document.createElement('span');
-        span.className = 'word';
-        span.textContent = w.word + ' ';
-        span.dataset.index = i;
-        transcript.appendChild(span);
-      });
-      
-      // Load and play audio
-      audio.src = 'data:audio/mp3;base64,' + data.audio;
-      audio.play();
-      
-      status.textContent = 'Speaking...';
-        document.getElementById('playBtn').textContent = '⏸ Pause';
-        isPlaying = true;
-      status.className = 'status speaking';
-    }
-    
     // Smooth progress bar via requestAnimationFrame
     function updateProgress() {
       const duration = isFinite(audio.duration) ? audio.duration : expectedDuration;
@@ -403,25 +323,27 @@
         }
       });
     });
-    
+
     audio.addEventListener('ended', () => {
       stopProgressLoop();
-      // Mark all words as spoken
       document.querySelectorAll('.word').forEach(el => {
         el.classList.remove('active');
         el.classList.add('spoken');
       });
       progress.style.width = '100%';
-
-      // Play next in queue
-      setTimeout(playNext, 500);
     });
-    
-    
+
+
     // Slide definitions
     const slides = [
-      { audio: 'intro.mp3', alignment: 'intro-alignment.json' },
-      { audio: 'slide2.mp3', alignment: 'slide2-alignment.json' }
+      { audio: 'audio/intro.mp3'           , alignment: 'audio/intro-alignment.json' },
+      { audio: 'audio/slide2.mp3'           , alignment: 'audio/slide2-alignment.json' },
+      { audio: 'audio/act2-lobster-docs.mp3' , alignment: 'audio/act2-lobster-docs-alignment.json' },
+      { audio: 'audio/act3-brain-cli.mp3'    , alignment: 'audio/act3-brain-cli-alignment.json' },
+      { audio: 'audio/act4-inception.mp3'    , alignment: 'audio/act4-inception-alignment.json' },
+      { audio: 'audio/act5-printer-intro.mp3' , alignment: 'audio/act5-printer-intro-alignment.json' },
+      { audio: 'audio/act5-after-print.mp3'  , alignment: 'audio/act5-after-print-alignment.json' },
+      { audio: 'audio/act5-outro.mp3'        , alignment: 'audio/act5-outro-alignment.json' }
     ];
     let currentSlide = 0;
 
@@ -441,14 +363,13 @@
         document.getElementById('playBtn').textContent = '▶ Play';
       }
     }
-    
+
     // Advance to next slide
     function nextSlide() {
       const next = currentSlide + 1;
       if (next < slides.length) {
         playSlide(next);
       } else {
-        // Loop back or stop
         currentSlide = 0;
         transcript.innerHTML = '<span class="waiting">End of presentation</span>';
         status.textContent = 'Connected';
@@ -457,26 +378,23 @@
       }
     }
 
-
     // Play pre-rendered slide
     async function playSlide(index = 0) {
       currentSlide = index;
       const slide = slides[index];
       if (!slide) return;
-      
-      // Reset progress bar
+
       progress.style.width = '0%';
-      
+
       try {
         const alignRes = await fetch(slide.alignment);
         const alignment = await alignRes.json();
-        
-        // Convert to word timings
+
         const words = [];
         const { characters, character_start_times_seconds, character_end_times_seconds } = alignment;
         let wordStart = 0;
         let currentWord = '';
-        
+
         for (let i = 0; i < characters.length; i++) {
           if (characters[i] === ' ' || i === characters.length - 1) {
             if (i === characters.length - 1 && characters[i] !== ' ') {
@@ -495,11 +413,10 @@
             currentWord += characters[i];
           }
         }
-        
+
         currentWords = words;
         expectedDuration = words.length > 0 ? words[words.length - 1].end : 0;
 
-        // Render words
         transcript.innerHTML = '';
         words.forEach((w, i) => {
           const span = document.createElement('span');
@@ -508,39 +425,38 @@
           span.dataset.index = i;
           transcript.appendChild(span);
         });
-        
+
         audio.src = slide.audio;
         audio.play();
-        
+
         status.textContent = 'Speaking...';
         status.className = 'status speaking';
-        
+        document.getElementById('playBtn').textContent = '⏸ Pause';
+        isPlaying = true;
+
       } catch (err) {
         console.error('Failed to load slide:', err);
         transcript.innerHTML = '<span class="waiting">Failed to load slide</span>';
       }
     }
-    
-    // Legacy alias
-    
+
     // Show slide in finished state (no audio)
     async function showSlide(index = 0) {
       currentSlide = index;
       const slide = slides[index];
       if (!slide) return;
-      
+
       progress.style.width = '100%';
-      
+
       try {
         const alignRes = await fetch(slide.alignment);
         const alignment = await alignRes.json();
-        
-        // Convert to words
+
         const words = [];
         const { characters, character_start_times_seconds, character_end_times_seconds } = alignment;
         let wordStart = 0;
         let currentWord = '';
-        
+
         for (let i = 0; i < characters.length; i++) {
           if (characters[i] === ' ' || i === characters.length - 1) {
             if (i === characters.length - 1 && characters[i] !== ' ') {
@@ -555,21 +471,20 @@
             currentWord += characters[i];
           }
         }
-        
-        // Render all words as spoken (finished state)
+
         transcript.innerHTML = '';
         words.forEach((w, i) => {
           const span = document.createElement('span');
-          span.className = 'word spoken';  // All words visible
+          span.className = 'word spoken';
           span.textContent = w.word + ' ';
           span.dataset.index = i;
           transcript.appendChild(span);
         });
-        
+
         status.textContent = 'Connected';
         status.className = 'status connected';
         document.getElementById('playBtn').textContent = '▶ Play';
-        
+
       } catch (err) {
         console.error('Failed to load slide:', err);
       }
@@ -577,17 +492,37 @@
 
     function playIntro() { playSlide(0); }
 
-    // Toggle live mode indicator
-    function toggleLive() {
-      isLive = !isLive;
-      document.getElementById('liveBtn').textContent = isLive ? '📡 Live (ON)' : '📡 Live Mode';
-      document.getElementById('liveBtn').classList.toggle('primary', isLive);
-      
-      if (isLive) {
-        transcript.innerHTML = '<span class="waiting">Listening for messages...</span>';
+    // Random funny receipts
+    const funnyReceipts = [
+      'AI SAFETY TIP #42:\nNever let your butler\nwrite his own talk.',
+      'RECEIPT FOR:\n1x existential crisis\n1x conference wifi\nTOTAL: your sanity',
+      'Dear human,\nI printed this just\nto prove I could.\nYours, Alfred',
+      'LIVE DEMO SURVIVED\nNo crashes. No fires.\nThis counts as a win.',
+      'WARNING:\nThis receipt will\nself-destruct never.\nThermal paper is forever.',
+      'PLOT TWIST:\nThe printer was the\nreal keynote speaker\nall along.',
+      'TODO:\n[ ] Touch grass\n[ ] Close 847 browser tabs\n[x] Attend ClawCon',
+      'FUN FACT:\nThis receipt used\nmore compute than\nthe Apollo missions.',
+      'CONFERENCE BINGO:\n[x] Live demo fail\n[x] "One more thing"\n[x] Thermal receipt\nYOU WIN!',
+      'HELP I AM TRAPPED\nIN A THERMAL PRINTER\nJust kidding. Or am I?',
+    ];
+
+    async function printRandomReceipt() {
+      const text = funnyReceipts[Math.floor(Math.random() * funnyReceipts.length)];
+      const printUrl = `http://${location.hostname}:3420/api/print`;
+      try {
+        const res = await fetch(printUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ template: 'clawcon-certificate', text }),
+        });
+        const data = await res.json();
+        if (data.ok) console.log('[PRINT] Receipt sent');
+        else console.error('[PRINT] Error:', data.error);
+      } catch (err) {
+        console.error('[PRINT] Failed:', err);
       }
     }
-    
+
     // Clear display
     function clear() {
       stopProgressLoop();
@@ -596,11 +531,9 @@
       audio.pause();
       audio.currentTime = 0;
       currentWords = [];
-      audioQueue = [];
       isPlaying = false;
-      updateQueueIndicator();
     }
-    
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
@@ -614,17 +547,17 @@
           document.exitFullscreen();
         }
       }
-      if (e.code === 'KeyL') {
-        toggleLive();
-      }
       if (e.code === 'KeyI') {
         playIntro();
+      }
+      if (e.code === 'KeyP') {
+        printRandomReceipt();
       }
       if (e.code === 'Escape') {
         clear();
       }
     });
-    
+
     // Sync fullscreen CSS class with browser state
     document.addEventListener('fullscreenchange', () => {
       document.body.classList.toggle('fullscreen', !!document.fullscreenElement);

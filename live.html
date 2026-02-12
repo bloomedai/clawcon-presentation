@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alfred Live | ClawCon Vienna 2026</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Georgia', serif;
+      background: #0a0a0a;
+      color: #f0f0f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 1000px;
+      width: 100%;
+      text-align: center;
+    }
+
+    header {
+      margin-bottom: 3rem;
+    }
+
+    h1 {
+      font-size: 1.2rem;
+      color: #666;
+      font-weight: normal;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+    }
+
+    .status {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.3rem 1rem;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-family: monospace;
+    }
+
+    .status.connected { background: #27ae60; color: white; }
+    .status.disconnected { background: #e74c3c; color: white; }
+    .status.speaking { background: #f39c12; color: white; }
+
+    .transcript {
+      font-size: 2.8rem;
+      line-height: 1.5;
+      min-height: 250px;
+      padding: 2rem;
+    }
+
+    .word {
+      display: inline;
+      opacity: 0.15;
+      transition: opacity 0.12s ease, transform 0.12s ease;
+    }
+
+    .word.active {
+      opacity: 1;
+      color: #fff;
+    }
+
+    .word.spoken {
+      opacity: 0.6;
+    }
+
+    .controls {
+      margin-top: 3rem;
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: #333;
+      color: white;
+      border: none;
+      padding: 0.8rem 2rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+      font-family: inherit;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #444; }
+
+    .progress {
+      width: 100%;
+      height: 3px;
+      background: #222;
+      margin-top: 2rem;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #e74c3c, #f39c12);
+      width: 0%;
+    }
+
+    .progress-bar.animated {
+      animation: progress-glow 2s ease-in-out infinite;
+    }
+
+    @keyframes progress-glow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .mode-indicator {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      font-size: 0.8rem;
+      color: #666;
+      font-family: monospace;
+    }
+
+    .queue-indicator {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      font-size: 0.75rem;
+      color: #444;
+      font-family: monospace;
+    }
+
+    /* Fullscreen mode */
+    body.fullscreen .controls { opacity: 0; }
+    body.fullscreen .mode-indicator { opacity: 0; }
+    body.fullscreen .status { opacity: 0.3; }
+
+    /* Footer brand watermark */
+    .footer-brand {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .footer-logo {
+      font-size: 20vw;
+      font-weight: bold;
+      line-height: 1;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.04);
+      margin-bottom: -0.35em;
+      white-space: nowrap;
+    }
+
+    /* Waiting animation */
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.6; }
+    }
+
+    .waiting {
+      animation: pulse 2s ease-in-out infinite;
+      font-style: italic;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="mode-indicator">
+    Press F for fullscreen · Escape to clear
+  </div>
+
+  <div class="container">
+    <header>
+      <h1>🎩 Alfred · Live</h1>
+      <div class="status disconnected" id="status">Connecting...</div>
+    </header>
+
+    <div class="transcript" id="transcript">
+      <span class="waiting">Listening for messages...</span>
+    </div>
+
+    <div class="progress">
+      <div class="progress-bar" id="progress"></div>
+    </div>
+
+    <div class="controls">
+      <button onclick="clear()" id="clearBtn">✕ Clear</button>
+    </div>
+  </div>
+
+  <div class="queue-indicator" id="queue"></div>
+
+  <footer class="footer-brand" aria-hidden="true">
+    <span class="footer-logo">Alfred</span>
+  </footer>
+
+  <audio id="audio"></audio>
+
+  <script>
+    // State
+    let ws = null;
+    let currentWords = [];
+    let audioQueue = [];
+    let isPlaying = false;
+    let expectedDuration = 0;
+    let rafId = null;
+
+    const audio = document.getElementById('audio');
+    const transcript = document.getElementById('transcript');
+    const progress = document.getElementById('progress');
+    const status = document.getElementById('status');
+    const queueEl = document.getElementById('queue');
+
+    // WebSocket connection
+    function connect() {
+      const wsUrl = `ws://${location.host}/ws`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('[WS] Connected');
+        status.textContent = 'Connected';
+        status.className = 'status connected';
+      };
+
+      ws.onclose = () => {
+        console.log('[WS] Disconnected, reconnecting...');
+        status.textContent = 'Disconnected';
+        status.className = 'status disconnected';
+        setTimeout(connect, 2000);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        // Handle control messages
+        if (data.type === 'control') {
+          switch (data.action) {
+            case 'navigate':
+              sessionStorage.setItem('returnUrl', location.href);
+              location.href = data.url;
+              break;
+            case 'clear':
+              clear();
+              break;
+            case 'fullscreen':
+              if (data.enabled) {
+                document.documentElement.requestFullscreen().catch(() => {});
+              } else {
+                if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+              }
+              break;
+          }
+          return;
+        }
+
+        console.log('[WS] Message:', data.type);
+
+        if (data.type === 'speak') {
+          queueSpeech(data);
+        }
+      };
+    }
+
+    // Queue management for multiple messages
+    function queueSpeech(data) {
+      audioQueue.push(data);
+      updateQueueIndicator();
+      if (!isPlaying) {
+        playNext();
+      }
+    }
+
+    function updateQueueIndicator() {
+      queueEl.textContent = audioQueue.length > 0 ? `Queue: ${audioQueue.length}` : '';
+    }
+
+    function playNext() {
+      if (audioQueue.length === 0) {
+        isPlaying = false;
+        status.textContent = 'Connected';
+        status.className = 'status connected';
+        return;
+      }
+
+      isPlaying = true;
+      const data = audioQueue.shift();
+      updateQueueIndicator();
+      playSpeech(data);
+    }
+
+    // Play speech with karaoke sync
+    function playSpeech(data) {
+      currentWords = data.words;
+      expectedDuration = currentWords.length > 0 ? currentWords[currentWords.length - 1].end : 0;
+
+      progress.style.width = '0%';
+
+      transcript.innerHTML = '';
+      currentWords.forEach((w, i) => {
+        const span = document.createElement('span');
+        span.className = 'word';
+        span.textContent = w.word + ' ';
+        span.dataset.index = i;
+        transcript.appendChild(span);
+      });
+
+      audio.src = 'data:audio/mp3;base64,' + data.audio;
+      audio.play();
+
+      status.textContent = 'Speaking...';
+      status.className = 'status speaking';
+      isPlaying = true;
+    }
+
+    // Smooth progress bar via requestAnimationFrame
+    function updateProgress() {
+      const duration = isFinite(audio.duration) ? audio.duration : expectedDuration;
+      if (duration > 0) {
+        const pct = Math.min((audio.currentTime / duration) * 100, 100);
+        progress.style.width = pct + '%';
+      }
+      rafId = requestAnimationFrame(updateProgress);
+    }
+
+    function startProgressLoop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      progress.classList.add('animated');
+      rafId = requestAnimationFrame(updateProgress);
+    }
+
+    function stopProgressLoop() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      progress.classList.remove('animated');
+    }
+
+    audio.addEventListener('play', startProgressLoop);
+    audio.addEventListener('pause', stopProgressLoop);
+
+    // Audio time update - sync words
+    audio.addEventListener('timeupdate', () => {
+      const currentTime = audio.currentTime;
+
+      document.querySelectorAll('.word').forEach((el, i) => {
+        const timing = currentWords[i];
+        if (!timing) return;
+
+        el.classList.remove('active', 'spoken');
+
+        if (currentTime >= timing.start && currentTime < timing.end + 0.15) {
+          el.classList.add('active');
+        } else if (currentTime >= timing.end) {
+          el.classList.add('spoken');
+        }
+      });
+    });
+
+    audio.addEventListener('ended', () => {
+      stopProgressLoop();
+      document.querySelectorAll('.word').forEach(el => {
+        el.classList.remove('active');
+        el.classList.add('spoken');
+      });
+      progress.style.width = '100%';
+
+      // Play next in queue
+      setTimeout(playNext, 500);
+    });
+
+    // Clear display
+    function clear() {
+      stopProgressLoop();
+      transcript.innerHTML = '<span class="waiting">Listening for messages...</span>';
+      progress.style.width = '0%';
+      audio.pause();
+      audio.currentTime = 0;
+      currentWords = [];
+      audioQueue = [];
+      isPlaying = false;
+      updateQueueIndicator();
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyF') {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else {
+          document.exitFullscreen();
+        }
+      }
+      if (e.code === 'Escape') {
+        clear();
+      }
+    });
+
+    // Sync fullscreen CSS class with browser state
+    document.addEventListener('fullscreenchange', () => {
+      document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
+    });
+
+    // Start
+    connect();
+  </script>
+</body>
+</html>
