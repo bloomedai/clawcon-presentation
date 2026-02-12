@@ -75,7 +75,7 @@ function btReset() {
   execSync('blueutil --power 1', { timeout: 5000 });
   sleep(3000);
 
-  execSync(`echo "${BT_PIN}" | blueutil --pair ${BT_ADDRESS}`, { timeout: 15000 });
+  execSync(`expect -c 'spawn blueutil --pair ${BT_ADDRESS}; expect "Enter:"; send "${BT_PIN}\\r"; expect eof'`, { timeout: 15000 });
   sleep(1000);
   execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
 
@@ -366,4 +366,10 @@ server.listen(PORT, () => {
      -H "Content-Type: application/json" \\
      -d '{"template":"clawcon-certificate","text":"Network with people!"}'
   `);
+
+  startWorker().then(() => {
+    log('BOOT', 'Printer ready');
+  }).catch(err => {
+    log('BOOT', `Printer init failed: ${err.message} (will retry on first print)`);
+  });
 });
