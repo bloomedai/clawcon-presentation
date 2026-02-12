@@ -18,6 +18,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8080;
@@ -166,9 +167,6 @@ const server = http.createServer(async (req, res) => {
             broadcast({ type: 'control', action: 'playSlide', index: index || 0 });
             result.slide = index;
             break;
-          case 'toggleLive':
-            broadcast({ type: 'control', action: 'toggleLive' });
-            break;
           case 'navigate':
             broadcast({ type: 'control', action: 'navigate', url });
             result.url = url;
@@ -196,7 +194,10 @@ const server = http.createServer(async (req, res) => {
 
   
   // Static file serving
-  let filePath = req.url === '/' ? '/index.html' : req.url;
+  let filePath;
+  if (req.url === '/') filePath = '/scripted.html';
+  else if (req.url === '/live') filePath = '/live.html';
+  else filePath = req.url;
   filePath = path.join(__dirname, filePath);
   
   const ext = path.extname(filePath);
@@ -241,4 +242,7 @@ server.listen(PORT, () => {
                -H "Content-Type: application/json" \\
                -d '{"text": "Hello from Alfred"}'
   `);
+
+  const url = `http://localhost:${PORT}`;
+  exec(process.platform === 'darwin' ? `open ${url}` : process.platform === 'win32' ? `start ${url}` : `xdg-open ${url}`);
 });
