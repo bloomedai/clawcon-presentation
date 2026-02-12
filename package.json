@@ -4,8 +4,8 @@
   "description": "Alfred's self-presenting slides for ClawCon Vienna 2026",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
+    "start": "node server.js & node print-server.js & wait",
+    "serve": "node server.js",
     "print": "node print-server.js"
   },
   "keywords": [
