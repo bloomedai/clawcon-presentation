@@ -68,28 +68,28 @@ function btReset() {
 
   try { execSync(`blueutil --disconnect ${BT_ADDRESS}`, { timeout: 3000 }); } catch {}
   try { execSync(`blueutil --unpair ${BT_ADDRESS}`, { timeout: 3000 }); } catch {}
-  sleep(1000);
+  sleep(500);
 
   execSync('blueutil --power 0', { timeout: 5000 });
-  sleep(2000);
+  sleep(1000);
   execSync('blueutil --power 1', { timeout: 5000 });
-  sleep(3000);
+  sleep(1500);
 
   execSync(`expect -c 'spawn blueutil --pair ${BT_ADDRESS}; expect "Enter:"; send "${BT_PIN}\\r"; expect eof'`, { timeout: 15000 });
-  sleep(1000);
+  sleep(500);
   execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
 
   // Wait for serial device (may need a disconnect+reconnect cycle)
   for (let attempt = 0; attempt < 3; attempt++) {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       if (deviceExists()) {
         log('BT', 'Reset complete, serial device ready');
         return;
       }
-      sleep(1000);
+      sleep(500);
     }
     try { execSync(`blueutil --disconnect ${BT_ADDRESS}`, { timeout: 3000 }); } catch {}
-    sleep(1000);
+    sleep(500);
     execSync(`blueutil --connect ${BT_ADDRESS}`, { timeout: 10000 });
   }
 
@@ -126,10 +126,10 @@ ser.timeout = 2
 ser.hupcl = False
 ser.open()
 # Warmup: send ESC @ (init) to confirm the RFCOMM channel is truly live
-time.sleep(2)
+time.sleep(1)
 ser.write(b'\\x1b@')
 ser.flush()
-time.sleep(1)
+time.sleep(0.5)
 print("READY", flush=True)
 for line in sys.stdin:
     hex_data = line.strip()
